@@ -1,0 +1,266 @@
+# import library and function
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import precision_score, recall_score, average_precision_score, prec 
+from sklearn.preprocessing import StandardScaler
+from tensorflow import keras
+from keras import callbacks
+import tensorflow as tf
+import calendar
+import os
+import sys
+sys.path.append('/nas/pyfrm_sit_2/innovation/fraud/dcpt/model_2023/common_code/functions
+from template_functions import calculate_metrics
+from metrics import calculator
+
+# Define the final feature list based on the model's features 
+feature_list[78 features]
+
+## Load down-sampled data
+# in-time
+df_it_initial = pd.read_parquet ('hdfs://cecldev/edl/appl/pyfrm/fraud/p2p_rcv/temp/df_mrd_IT_smp')
+# add colmn with in-time 
+extra_col_list_it=['fraud_tag', 'valid_ind', 'sampling_weight', 'tran_ts']
+
+df_it_combined= df_it_initial[ feature_list + extra_col_list_it].copy() 
+df_it_combined [ 'year_month'] = df_it_combined [ 'tran_ts'].dt.to_period('M') 
+df_it_combined = df_it_combined.sort_values(['tran_ts']) # sorted by date 
+
+df_oot_combined = df_it_combined.drop([valid_ind], axis =1)
+
+
+# Model 2: Architecture
+def create_model(learning_rate=0.001):
+    model = keras.Sequential([
+        keras.layers. Input (shape=(78,)),
+        keras.layers. Dense (512, activation= 'relu'),
+        keras.layers. Dropout (0.4),
+        keras.layers. Dense (256, activation= 'relu'),
+        keras.layers.Dropout (0.3),
+        keras.layers. Dense (128, activation='relu'), keras.layers. Dropout (0.2),
+        keras.layers. Dense (1, activation = 'sigmoid')
+    ])
+    model.compile(
+        optimizer-keras. optimizers.Adam (learning_rate-learning_rate),
+        loss='binary_crossentropy',
+        metrics=['accuracy',
+                 tf.keras.metrics.Precision (name='precision'), 
+                 tf.keras.metrics. Recall (name='recall'),
+                 tf.keras.metrics. AUC (curve='PR', name='auc_pr')]
+    return model
+
+earlystopping = callbacks.EarlyStopping (monitor="val_loss",mode="min",patience=10,restore_best_weights=True)
+
+# Initial training
+
+#Initialize storage
+models= {}
+model3_train_results = []
+model3_test_results= []
+training_histories = []
+
+
+---- Model 3: Dynamic Full train Model Training (2023 September - 2024 March)----------------
+print("\nStarting Model 3: Monthly Full Training...")
+
+
+initial_start = pd.Period('2023-04', freq = 'M')
+current_date = pd. Period ('2023-09', freq = 'M')    # First update month (September 2023)
+last_train_date = pd. Period ('2024-03', freq = 'M') # Last update month (March 2024)
+
+while current_date <= last_train_date:
+# Define train window (1 month) 
+    train_mask = (df_it_combined [ 'year_month'] >= initial_start) &(df_it_combined [ 'year_month'] <= current_date)
+    train_data = df_it_combined [train_mask]
+
+    print(f"Training data period: {current_date}") 
+    print(f"Training data size: (len(train_data)}")
+
+    # Split training data (2023) in train and valid sets
+    df_train = train_data.loc[(train_data['valid_ind'] ==0), :].reset_index(drop=True).copy()
+    df_train = df_train.drop('valid_ind', axis =1)
+    df_valid = train_data.loc[(train_data['valid_ind'] ==1), :].reset_index(drop=True).copy() 
+    df_valid = df_valid.drop('valid_ind', axis =1) 
+
+    if Current_date == pd.Period('2023-04'):
+        # identify cols with nulls from train data
+        col_with_nulls = df_train.columns [df_train.isnull().any()].tolist()
+        # Fit imputer on train data
+        median_imputer = SimpleImputer (strategy='median')
+        median_imputer.fit(df_train[col_with_nulls])
+        # Transform all datasets
+        #Impute train data
+        df_train_imputed = df_train.copy()
+        df_train_imputed [col_with_nulls] = median_imputer.transform(df_train [col_with_nulls]) 
+        ### split into X, y, weight and value
+        # train
+        X_train = df_train_imputed.copy()
+        X_train = X_train.drop(['fraud_tag', 'tran_ts', 'year_month', 'sampling_weight'], axis -1) 
+        y_train = df_train_imputed['fraud_tag'].copy()
+    
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train) 
+        
+    else:
+        #Impute train data
+        df_train_imputed = df_train.copy()
+        df_train_imputed [col_with_nulls]= median_imputer.transform(df_train [col_with_nulls]) 
+
+        X_train_scaled = scaler.transform(X_train)
+
+    #Impute valid data
+    df_valid_imputed = df_valid.copy()
+    df_valid_imputed [col_with_nulls] = median_imputer.transform(df_valid [col_with_nulls]) 
+    X_val_scaled = scaler.transform (X_val)
+    
+    # Prepare monthly data
+   
+    # valid
+    X_val =  df_valid_imputed.copy()
+    X_val = X_val.drop(['fraud_tag', 'tran_ts', 'year_month', 'sampling_weight'], axis =1) 
+    y_val = df_valid_imputed [ 'fraud_tag'].copy()
+    
+    # scale monthly data
+    X_val_scaled = scaler.transform(X_val)
+
+
+    # Train on current month
+    history = current_model.fit(X_train_scaled, y_train,
+              validation_data = (X_val_scaled, y_val),
+              epochs=400,
+              batch_size=2048,
+              verbose=1,
+              callbacks= [earlystopping]
+)
+    
+    # Store model 
+    models [current_date] = current_model             # Saves the full September model/ October/ so on....
+    training_histories.append({
+    'window_end': current_date,
+    'history' : history)}
+    
+    # Store last epoch's training metrics 
+    model3_train_results.append({
+        'date': current_date,
+        #'epoch': range(1, len(history.history['loss']) + 1), 
+        'train_loss': history.history['train_loss'][-1], 
+        'val loss':    history.history['val_loss'][-1],
+        'train_accuracy': history.history['accuracy'][-1], 
+        'val_accuracy': history.history['val_accuracy'][-1], 
+        'train_auc_pr': history.history['auc_pr'][-1], 
+        'val_auc_pr': history.history['val_auc_pr'][-1]
+})
+
+
+    # Model 3: Plot Training Metrics
+    print(f"\n# Model 3: Plot {current_date}Training metrics")
+    plt.figure(figsize=(15, 5))
+    metrics_to_plot = {
+        'Loss': ['train_loss', 'val_loss'],
+        'Accuracy': ['train_accuracy', 'val_accuracy'],
+        'AUC-PR': ['train_auc_pr', 'val_auc_pr']
+    }
+
+    for i, (metric_name, metric_keys) in enumerate (metrics_to_plot.items()): 
+        plt.subplot(1, 3, i + 1)
+        plt.plot(history.history [metric_keys[0]], label='Train') 
+        plt.plot(history.history [metric_keys [1]], label='Validation') 
+        plt.title(f'Model 3 {current_date} - {metric_name} over Epochs')
+        plt.xlabel('Epoch')
+        plt.ylabel(metric_name)
+        plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+    # Model 3: Testing on Rolling Months
+    test_start = current_date +1
+
+    test_mask = (df_oot_combined [ 'year_month'] == test_start)
+    test_data = df_oot_combined [test_mask]
+
+    print (f" Testing Period: {test_start}")
+    print (f"Test data size: {len (test_data)}")
+    
+    # Impute Test data
+    test_data_imputed = test_data.copy()
+    test_data_imputed [col_with_nulls] = median_imputer.transform(test_data[col_with_nulls]) 
+    if len(test_data) > 0:
+        # Prepare test data
+        X_test = test_data_imputed.copy()
+        X_test = test_data_imputed.drop(['fraud_tag', 'tran_ts', 'year_month', 'sampling_weight'], axis =1)
+        y_test = test_data_imputed['fraud_tag'].copy()
+        weight_test = test_data_imputed['sampling_weight'].copy()
+        
+        X_test_scaled = scaler.transform(X_test)
+        
+        # Get predictions
+        y_pred_proba = current_model.predict(X_test_scaled, verbose=0)
+        
+        # Calculate metrics using calculate_metrics function
+        test_metrics = calculate_metrics (
+            pred = y_pred_proba.flatten(), # predicted probabilities
+            y = y_test,             #true Labels 
+            weight weight_test,   # using sampling_weight
+            threshold = 0.01,
+            metrics = ['KS', 'AUC', 'AUCPR', 'DR', 'FPR'])
+
+
+        #Store results 
+        model3_test_results.append({
+
+           'date': current_date,
+           'model_name': "Incremental",
+           'window': f"tetsing Period: {test_start}))",
+           'AUC': test_metrics['AUC'],
+           'PR-AUC': test_metrics['AUCPR'],
+           'DR': test_metrics['DR'],
+           'FPR': test_metrics["FPR"]
+})
+    
+    current_date = current_date + 1
+   
+
+# Print Summary metrics
+print("\nTraining Metrics:")
+print (model3_train_results)
+
+# Convert training results to DataFrame
+model3_train_results_df = pd.DataFrame (model3_train_results)
+
+# Convert test results to DataFrames
+model3_test_results_df = pd.DataFrame(model3_test_results)
+
+print("Model 3 (Full Train) Test Metrics for each window:")
+print (model3_test_results[['window', 'AUC', 'PR-AUC', 'DR', 'FPR']])
+
+print("\nAverage Test Metrics:")
+print (model3_test_results[['window', 'AUC', 'PR-AUC', 'DR', 'FPR']).mean())
+
+
+---ModeL 3: Plot Test Metrics-----
+plt.figure(figsize=(15, 15))
+metrics = ['AUC', 'PR-AUC', 'DR', 'FPR']
+for i, metric in enumerate(metrics):
+    plt.subplot(4, 2, i+1)
+    plt.plot(range(len(model3_test_results_df)), model3_test_results_df[metric], label='Full Train Model', color='green')
+    plt.title(f"{metric} Over Test Windows")
+    plt.xlabel('Test Window')
+    plt.ylabel(metric)
+    plt.grid(True, linestyle="--", alpha=0.7)
+    plt.legend()
+    
+    # Use window Labels for x-axis
+    plt.xticks(range(len(model3_test_results_df)),
+        model3_test_results_df['window'],
+        rotation=90, ha='right')
+plt.tight_layout()
+plt.show()
+
+
+
